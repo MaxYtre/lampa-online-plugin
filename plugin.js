@@ -228,16 +228,17 @@
             if (typeof Buffer !== 'undefined') return Buffer.from(str).toString('base64');
             return str;
         },
-        buildProxyUrl: function (url, filename, proxyIndex) {
+        buildProxyUrl: function (url, filename, proxyIndex, customParam) {
             if (!url) return '';
             var baseHost = CORS_PROXIES[proxyIndex || 0] || CORS_PROXIES[0];
-            var enc = encodeURIComponent(Utils.encodeBase64(url));
+            var prefix = customParam ? (customParam + '/') : '';
+            var enc = encodeURIComponent(Utils.encodeBase64(prefix + url));
             var name = filename || 'api';
             return baseHost + 'enc2/' + enc + '/' + name + '?jacred.test';
         },
-        requestWithProxyFallback: function (targetUrl, filename, onSuccess, onError) {
+        requestWithProxyFallback: function (targetUrl, filename, onSuccess, onError, customParam) {
             var network = new Lampa.Reguest();
-            var proxy0 = Utils.buildProxyUrl(targetUrl, filename, 0);
+            var proxy0 = Utils.buildProxyUrl(targetUrl, filename, 0, customParam);
 
             network.clear();
             network.timeout(12000);
@@ -255,7 +256,7 @@
             });
 
             function tryFallback() {
-                var proxy1 = Utils.buildProxyUrl(targetUrl, filename, 1);
+                var proxy1 = Utils.buildProxyUrl(targetUrl, filename, 1, customParam);
                 network.clear();
                 network.timeout(12000);
                 network.silent(proxy1, function (res2) {
@@ -659,7 +660,7 @@
 
         formatStreamUrl: function (link, quality) {
             if (!link) return '';
-            var clean = link.replace(/^https:\/\//i, 'http://');
+            var clean = link;
             if (clean.indexOf('%s') !== -1) {
                 clean = clean.replace('%s', quality);
             } else if (/\[[^\]]+\]/.test(clean)) {
@@ -688,6 +689,7 @@
             var orig = Utils.getMovieOrigTitle(movie);
             var query = title || orig;
             var targetYear = Utils.getMovieYear(movie);
+            var filmixParam = 'param/User-Agent=' + encodeURIComponent('okhttp/3.10.0');
 
             if (!query) {
                 onError('Не указано название для поиска на Filmix');
@@ -708,14 +710,14 @@
                             });
                         }, function () {
                             onError('На Filmix релиз "' + (title || orig) + '" не найден');
-                        });
+                        }, filmixParam);
                     } else {
                         onError('На Filmix релиз "' + (title || orig) + '" не найден');
                     }
                 });
             }, function (errMsg) {
                 onError('Filmix недоступен: ' + errMsg);
-            });
+            }, filmixParam);
         },
 
         filterStrict: function (list, movie, targetYear, onComplete, onNoStrict) {
@@ -746,6 +748,7 @@
 
         loadDetails: function (postId, onComplete, onError) {
             var postApiUrl = 'http://filmixapp.cyou/api/v2/post/' + postId + Filmix.getApiParams();
+            var filmixParam = 'param/User-Agent=' + encodeURIComponent('okhttp/3.10.0');
 
             Utils.requestWithProxyFallback(postApiUrl, 'post', function (post) {
                 if (typeof post === 'string') post = Utils.parseJson(post) || {};
@@ -769,7 +772,7 @@
                 onComplete(post);
             }, function (errMsg) {
                 onError('Ошибка загрузки данных с Filmix: ' + errMsg);
-            });
+            }, filmixParam);
         }
     };
 

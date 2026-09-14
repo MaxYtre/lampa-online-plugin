@@ -1,0 +1,24 @@
+{
+  "name": "lampa-online-plugin",
+  "version": "1.3.0",
+  "description": "Lampa Online Video Streams Plugin & Automated Stream Verification Suite",
+  "main": "plugin.js",
+  "scripts": {
+    "test": "node test.js",
+    "test:quick": "node test.js --quick",
+    "test:southpark": "node test.js --title \"Южный Парк\"",
+    "test:movie": "node test.js --title \"Интерстеллар\"",
+    "test:filmix": "node test.js --provider filmix",
+    "test:collaps": "node test.js --provider collaps"
+  },
+  "keywords": [
+    "lampa",
+    "lampa-plugin",
+    "streaming",
+    "hls",
+    "filmix",
+    "collaps"
+  ],
+  "author": "MaxYtre",
+  "license": "MIT"
+}

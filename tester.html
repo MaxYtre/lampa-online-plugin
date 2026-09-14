@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lampa Online Plugin - Интерактивный тестер видеопотоков</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <style>
+        :root {
+            --bg: #0f111a;
+            --card-bg: #181b29;
+            --accent: #ff4757;
+            --accent-glow: rgba(255, 71, 87, 0.35);
+            --text: #f1f2f6;
+            --text-dim: #a4b0be;
+            --success: #2ed573;
+            --warning: #ffa502;
+            --border: rgba(255, 255, 255, 0.08);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 24px 16px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        h1 {
+            font-size: 26px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #ff6b81, #ff4757);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+        }
+
+        p.subtitle {
+            color: var(--text-dim);
+            font-size: 14px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 960px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+        }
+
+        .card-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text);
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        label {
+            font-size: 13px;
+            color: var(--text-dim);
+            font-weight: 500;
+        }
+
+        input[type="text"] {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: var(--text);
+            font-size: 15px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        input[type="text"]:focus {
+            border-color: var(--accent);
+        }
+
+        .btn-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        button {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        button:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        button.primary {
+            background: linear-gradient(135deg, #ff4757, #e84118);
+            border: none;
+            box-shadow: 0 4px 15px var(--accent-glow);
+        }
+
+        button.primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px var(--accent-glow);
+        }
+
+        .player-wrapper {
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            aspect-ratio: 16 / 9;
+            width: 100%;
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            background: rgba(255, 255, 255, 0.05);
+            margin-bottom: 12px;
+        }
+
+        .status-badge.ok {
+            background: rgba(46, 213, 115, 0.15);
+            color: var(--success);
+            border: 1px solid rgba(46, 213, 115, 0.3);
+        }
+
+        .status-badge.err {
+            background: rgba(255, 71, 87, 0.15);
+            color: var(--accent);
+            border: 1px solid rgba(255, 71, 87, 0.3);
+        }
+
+        .status-badge.info {
+            background: rgba(255, 165, 2, 0.15);
+            color: var(--warning);
+            border: 1px solid rgba(255, 165, 2, 0.3);
+        }
+
+        .log-box {
+            background: #0a0c14;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 12px;
+            color: #dcdde1;
+            height: 220px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            line-height: 1.5;
+        }
+
+        .quick-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 14px;
+        }
+
+        .quick-chip {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 4px 10px;
+            font-size: 12px;
+            cursor: pointer;
+            color: var(--text-dim);
+            transition: all 0.15s;
+        }
+
+        .quick-chip:hover {
+            color: var(--text);
+            border-color: var(--accent);
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>🎬 Lampa Online Plugin Tester</h1>
+        <p class="subtitle">Автономное тестирование поиска и воспроизведения видеопотоков (Filmix, Collaps, Kodik)</p>
+    </header>
+
+    <div class="container">
+        <!-- Левая колонка: Управление и выбор источника -->
+        <div class="card">
+            <div class="card-title">🔍 Параметры поиска</div>
+
+            <div class="input-group">
+                <label>Быстрый выбор:</label>
+                <div class="quick-links">
+                    <span class="quick-chip" onclick="setSearch('Южный Парк', 161252)">Южный Парк (Сериал)</span>
+                    <span class="quick-chip" onclick="setSearch('Интерстеллар', 258687)">Интерстеллар (Фильм)</span>
+                    <span class="quick-chip" onclick="setSearch('Рик и Морти', 685246)">Рик и Морти (Сериал)</span>
+                    <span class="quick-chip" onclick="setSearch('Матрица', 301)">Матрица (Фильм)</span>
+                </div>
+            </div>
+
+            <div class="input-group">
+                <label for="movieTitle">Название фильма или сериала:</label>
+                <input type="text" id="movieTitle" value="Южный Парк" placeholder="Например: Южный Парк">
+            </div>
+
+            <div class="input-group">
+                <label for="kpId">Кинопоиск ID (опционально):</label>
+                <input type="text" id="kpId" value="161252" placeholder="Например: 161252">
+            </div>
+
+            <div class="card-title" style="margin-top: 20px;">⚡ Выберите источник для проверки:</div>
+            <div class="btn-grid">
+                <button class="primary" onclick="testProvider('collaps')">⚡ Collaps (HLS)</button>
+                <button class="primary" onclick="testProvider('filmix')">🎬 Filmix (MP4)</button>
+                <button onclick="testProvider('kodik')">📦 Kodik</button>
+                <button onclick="testTestHls()">🛠️ Тест HLS</button>
+            </div>
+
+            <div id="statusBadge" class="status-badge info" style="display: none;">
+                <span id="statusText">Ожидание запуска...</span>
+            </div>
+
+            <div class="input-group">
+                <label>Журнал запросов:</label>
+                <div id="logBox" class="log-box">Нажмите на кнопку источника выше для запуска проверки...</div>
+            </div>
+        </div>
+
+        <!-- Правая колонка: Видеоплеер и метаданные потока -->
+        <div class="card">
+            <div class="card-title">▶️ Видеоплеер прямого эфира</div>
+
+            <div class="player-wrapper">
+                <video id="videoPlayer" controls autoplay playsinline></video>
+            </div>
+
+            <div class="input-group">
+                <label>Текущий воспроизводимый поток:</label>
+                <input type="text" id="streamUrlInput" readonly placeholder="Ссылка на видеопоток появится здесь">
+            </div>
+
+            <div class="input-group">
+                <label>Выбор дорожки / качества:</label>
+                <div id="qualityPills" class="quick-links">
+                    <span style="color: var(--text-dim); font-size: 13px;">(будет доступно после запуска потока)</span>
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 10px; margin-top: 14px;">
+                <button onclick="document.getElementById('videoPlayer').play()" style="flex: 1;">▶ Воспроизвести</button>
+                <button onclick="document.getElementById('videoPlayer').pause()" style="flex: 1;">⏸ Пауза</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Загрузка скрипта плагина -->
+    <script src="plugin.js"></script>
+
+    <script>
+        let hlsInstance = null;
+        const video = document.getElementById('videoPlayer');
+        const logBox = document.getElementById('logBox');
+        const statusBadge = document.getElementById('statusBadge');
+        const statusText = document.getElementById('statusText');
+        const streamUrlInput = document.getElementById('streamUrlInput');
+        const qualityPills = document.getElementById('qualityPills');
+
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logBox.textContent += `[${time}] ${msg}\n`;
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        function setStatus(type, text) {
+            statusBadge.style.display = 'inline-flex';
+            statusBadge.className = `status-badge ${type}`;
+            statusText.textContent = text;
+        }
+
+        function setSearch(title, kp) {
+            document.getElementById('movieTitle').value = title;
+            document.getElementById('kpId').value = kp || '';
+        }
+
+        function playStream(url, title, qualities) {
+            streamUrlInput.value = url;
+            log(`🎯 Найдено видео: "${title || ''}"`);
+            log(`🔗 URL потока: ${url}`);
+
+            if (qualities && Object.keys(qualities).length > 0) {
+                qualityPills.innerHTML = '';
+                Object.keys(qualities).forEach(q => {
+                    const pill = document.createElement('span');
+                    pill.className = 'quick-chip';
+                    pill.textContent = q;
+                    pill.onclick = () => playStream(qualities[q], title, qualities);
+                    qualityPills.appendChild(pill);
+                });
+            }
+
+            if (url.includes('.m3u8')) {
+                if (Hls.isSupported()) {
+                    if (hlsInstance) hlsInstance.destroy();
+                    hlsInstance = new Hls({ enableWorker: true });
+                    hlsInstance.loadSource(url);
+                    hlsInstance.attachMedia(video);
+                    hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+                        log('✅ HLS манифест успешно разобран браузером! Старт воспроизведения.');
+                        setStatus('ok', 'HLS Поток активен и воспроизводится');
+                        video.play().catch(e => log('Автовоспроизведение заблокировано браузером (нажмите Play): ' + e));
+                    });
+                    hlsInstance.on(Hls.Events.ERROR, (event, data) => {
+                        if (data.fatal) {
+                            log(`❌ Ошибка воспроизведения HLS: ${data.details}`);
+                            setStatus('err', 'Ошибка HLS видеопотока');
+                        }
+                    });
+                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                    video.src = url;
+                    video.play();
+                    setStatus('ok', 'Воспроизведение через нативный HLS плеер');
+                }
+            } else {
+                if (hlsInstance) {
+                    hlsInstance.destroy();
+                    hlsInstance = null;
+                }
+                video.src = url;
+                video.play().then(() => {
+                    log('✅ Прямой MP4 поток загружен и воспроизводится!');
+                    setStatus('ok', 'Прямой MP4 поток активен');
+                }).catch(e => {
+                    log('Автовоспроизведение: нажмите кнопку Воспроизвести: ' + e);
+                });
+            }
+        }
+
+        function testTestHls() {
+            log('Запуск тестового Big Buck Bunny HLS потока...');
+            playStream('https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', 'Test HLS Stream', { '1080p': 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8' });
+        }
+
+        function testProvider(providerName) {
+            const title = document.getElementById('movieTitle').value.trim();
+            const kp = document.getElementById('kpId').value.trim();
+
+            if (!title) {
+                alert('Пожалуйста, введите название!');
+                return;
+            }
+
+            log(`\n========================================`);
+            log(`🚀 Запуск проверки: "${title}" -> [${providerName.toUpperCase()}]`);
+            setStatus('info', `Поиск видеопотоков на ${providerName}...`);
+
+            const movie = {
+                title: title,
+                name: title,
+                original_title: title,
+                original_name: title,
+                kinopoisk_id: kp ? parseInt(kp) : null
+            };
+
+            // Перехватываем Lampa.Player и Select
+            window.Lampa.Player.play = function(item) {
+                playStream(item.url, item.title, item.quality);
+            };
+
+            window.Lampa.Noty.show = function(msg) {
+                log(`🔔 [Lampa]: ${msg}`);
+            };
+
+            let step = 0;
+            window.Lampa.Select.show = function(opts) {
+                step++;
+                log(`📋 Меню шаг ${step}: "${opts.title}" (элементов: ${opts.items ? opts.items.length : 0})`);
+                if (step === 1) {
+                    const target = opts.items.find(i => i.action === providerName);
+                    if (target) {
+                        log(`  -> Выбор источника [${providerName}]`);
+                        opts.onSelect(target);
+                    } else {
+                        log(`❌ Источник ${providerName} не найден в меню`);
+                        setStatus('err', 'Источник не найден');
+                    }
+                } else {
+                    // Автоматически выбираем первый доступный релиз / сезон / серию
+                    if (opts.items && opts.items.length > 0) {
+                        const first = opts.items[0];
+                        log(`  -> Авто-выбор: "${first.title || first.resTitle || first.transKey}"`);
+                        opts.onSelect(first);
+                    } else {
+                        log(`❌ Список вариантов пуст`);
+                        setStatus('err', 'Нет доступных эпизодов');
+                    }
+                }
+            };
+
+            // Вызываем открытие меню плагина
+            if (window.openOnlineMenu) {
+                window.openOnlineMenu(movie);
+            } else {
+                // Если открыт через fullListener
+                globalFullListener({
+                    type: 'complite',
+                    object: {
+                        activity: {
+                            render: () => ({
+                                find: () => ({ length: 1, after: () => {}, append: () => {} })
+                            })
+                        }
+                    },
+                    data: { movie }
+                });
+            }
+        }
+    </script>
+</body>
+</html>
