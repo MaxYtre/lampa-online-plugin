@@ -5,10 +5,13 @@
     window.plugin_online_mod_ready = true;
 
     var PLUGIN_NAME = 'Online Mod';
-    var PLUGIN_VERSION = '1.2.0';
+    var PLUGIN_VERSION = '1.3.0';
     var KODIK_TOKEN_DEFAULT = '41dd95f84c21719b09d6c71182237a25';
     var TEST_STREAM_URL = 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
-    var CORS_PROXY = 'https://cors.nb557.workers.dev/';
+    var CORS_PROXIES = [
+        'https://cors.nb557.workers.dev/',
+        'https://cors.fx666.workers.dev/'
+    ];
 
     // Инициализация локализации
     function initLang() {
@@ -37,14 +40,14 @@
                 uk: 'Джерела онлайн'
             },
             online_mod_collaps: {
-                ru: '⚡ Collaps (HLS, HDRezka, Кубик в Кубе, TVShows)',
-                en: '⚡ Collaps (HLS, HDRezka, Kubik, TVShows)',
-                uk: '⚡ Collaps (HLS, HDRezka, Кубик в Кубі, TVShows)'
+                ru: '⚡ Collaps (HLS, Paramount, Кубик, Rezka, LostFilm)',
+                en: '⚡ Collaps (HLS, Paramount, Kubik, Rezka, LostFilm)',
+                uk: '⚡ Collaps (HLS, Paramount, Кубик, Rezka, LostFilm)'
             },
             online_mod_collaps_desc: {
-                ru: 'Прямые HLS потоки (.m3u8), выбор озвучек и субтитров',
-                en: 'Direct HLS streams (.m3u8), audio tracks and subs',
-                uk: 'Прямі HLS потоки (.m3u8), вибір озвучок та субтитрів'
+                ru: 'Прямые HLS (.m3u8) потоки, все сезоны и дорожки без авторизации',
+                en: 'Direct HLS (.m3u8) streams, all seasons and dubs without auth',
+                uk: 'Прямі HLS (.m3u8) потоки, всі сезони та доріжки без авторизації'
             },
             online_mod_filmix: {
                 ru: '🎞️ Filmix (Фильмы, сериалы, 4K/1080p)',
@@ -82,9 +85,9 @@
                 uk: '🎌 AniLibria (Аніме, озвучка AniLibria HLS)'
             },
             online_mod_kodik: {
-                ru: '🎬 Kodik (Фильмы, сериалы, озвучки)',
-                en: '🎬 Kodik (Movies, Series, Dubs)',
-                uk: '🎬 Kodik (Фільми, серіали, озвучки)'
+                ru: '🎬 Kodik (Аниме, дорамы, сериалы)',
+                en: '🎬 Kodik (Anime, Doramas, Series)',
+                uk: '🎬 Kodik (Аніме, дорами, серіали)'
             },
             online_mod_searching: {
                 ru: 'Поиск видеопотока...',
@@ -126,20 +129,37 @@
 
     // Вспомогательные функции
     var Utils = {
+        getMovieTitle: function (movie) {
+            return (movie && (movie.title || movie.name)) || '';
+        },
+        getMovieOrigTitle: function (movie) {
+            return (movie && (movie.original_title || movie.original_name)) || '';
+        },
+        getMovieYear: function (movie) {
+            if (!movie) return 0;
+            var d = movie.release_date || movie.first_air_date || movie.last_air_date || movie.year || '';
+            return parseInt(String(d).slice(0, 4)) || 0;
+        },
         cleanTitle: function (str) {
             return (str || '').replace(/[\s.,:;’'`!?()\[\]\-_\\/]+/g, ' ').trim();
         },
         normalizeTitle: function (str) {
             return this.cleanTitle((str || '').toLowerCase().replace(/[\-\u2010-\u2015\u2E3A\u2E3B\uFE58\uFE63\uFF0D]+/g, '-').replace(/ё/g, 'е'));
         },
-        // Строгая и точная проверка совпадения фильма
+        randomHex: function (len) {
+            var s = '';
+            var hex = '0123456789abcdef';
+            for (var i = 0; i < (len || 16); i++) {
+                s += hex[Math.floor(Math.random() * 16)];
+            }
+            return s;
+        },
         isTitleMatch: function (itemTitle, itemOrigTitle, targetTitle, targetOrigTitle, itemYear, targetYear) {
             var normItemRu = Utils.normalizeTitle(itemTitle);
             var normItemEn = Utils.normalizeTitle(itemOrigTitle);
             var normTargetRu = Utils.normalizeTitle(targetTitle);
             var normTargetEn = Utils.normalizeTitle(targetOrigTitle);
 
-            // Проверка года (если оба заданы, разница не больше 1 года)
             if (itemYear && targetYear) {
                 var y1 = parseInt(itemYear);
                 var y2 = parseInt(targetYear);
@@ -148,16 +168,13 @@
                 }
             }
 
-            // 1. Полные строгие совпадения
             if (normTargetRu && (normItemRu === normTargetRu || normItemEn === normTargetRu)) return true;
             if (normTargetEn && (normItemEn === normTargetEn || normItemRu === normTargetEn)) return true;
 
-            // 2. Вхождение фраз с проверкой ключевых слов (чтобы "Южный Парк" не матчил "Парк" или "Парк культуры")
             function hasWords(source, target) {
                 if (!source || !target) return false;
                 var targetWords = target.split(' ').filter(function (w) { return w.length > 1; });
                 if (!targetWords.length) return false;
-                // Все слова из target обязаны присутствовать в source!
                 return targetWords.every(function (w) {
                     return source.indexOf(w) !== -1;
                 });
@@ -192,8 +209,8 @@
             return link;
         },
         buildCardHash: function (movie, extra) {
-            var original = movie.original_title || movie.title || '';
-            return Lampa.Utils.hash(original + (extra || ''));
+            var orig = Utils.getMovieOrigTitle(movie) || Utils.getMovieTitle(movie) || '';
+            return Lampa.Utils.hash(orig + (extra || ''));
         },
         markViewed: function (hash) {
             var viewed = Lampa.Storage.cache('online_view', 5000, []);
@@ -211,12 +228,49 @@
             if (typeof Buffer !== 'undefined') return Buffer.from(str).toString('base64');
             return str;
         },
-        buildProxyUrl: function (url, filename) {
+        buildProxyUrl: function (url, filename, proxyIndex) {
             if (!url) return '';
-            var baseProxy = 'https://cors.nb557.workers.dev/enc2/';
+            var baseHost = CORS_PROXIES[proxyIndex || 0] || CORS_PROXIES[0];
             var enc = encodeURIComponent(Utils.encodeBase64(url));
             var name = filename || 'api';
-            return baseProxy + enc + '/' + name + '?jacred.test';
+            return baseHost + 'enc2/' + enc + '/' + name + '?jacred.test';
+        },
+        requestWithProxyFallback: function (targetUrl, filename, onSuccess, onError) {
+            var network = new Lampa.Reguest();
+            var proxy0 = Utils.buildProxyUrl(targetUrl, filename, 0);
+
+            network.clear();
+            network.timeout(12000);
+            network.silent(proxy0, function (res) {
+                var parsed = Utils.parseJson(res);
+                if (parsed) {
+                    onSuccess(parsed);
+                } else if (typeof res === 'string' && res.length > 5 && res.indexOf('<html') === -1) {
+                    onSuccess(res);
+                } else {
+                    tryFallback();
+                }
+            }, function () {
+                tryFallback();
+            });
+
+            function tryFallback() {
+                var proxy1 = Utils.buildProxyUrl(targetUrl, filename, 1);
+                network.clear();
+                network.timeout(12000);
+                network.silent(proxy1, function (res2) {
+                    var parsed2 = Utils.parseJson(res2);
+                    if (parsed2) {
+                        onSuccess(parsed2);
+                    } else if (typeof res2 === 'string' && res2.length > 5) {
+                        onSuccess(res2);
+                    } else {
+                        onError('Ошибка ответа прокси сервера');
+                    }
+                }, function (a, c) {
+                    onError('Прокси сервер недоступен: ' + network.errorDecode(a, c));
+                });
+            }
         },
         parseJson: function (data) {
             if (typeof data === 'object' && data !== null) return data;
@@ -228,6 +282,23 @@
                 }
             }
             return null;
+        },
+        countKeys: function (obj) {
+            if (!obj) return 0;
+            if (Array.isArray(obj)) return obj.length;
+            if (typeof obj === 'string') {
+                var p = Utils.parseJson(obj);
+                if (p) return Utils.countKeys(p);
+                return 0;
+            }
+            if (typeof obj === 'object') {
+                var c = 0;
+                for (var k in obj) {
+                    if (Object.prototype.hasOwnProperty.call(obj, k)) c++;
+                }
+                return c;
+            }
+            return 0;
         }
     };
 
@@ -248,7 +319,7 @@
 
         var first = {
             url: TEST_STREAM_URL,
-            title: 'Диагностика плеера: Big Buck Bunny (Демо HLS)',
+            title: 'Диагностика плеера - Тестовый поток HLS',
             quality: testStreams,
             timeline: view
         };
@@ -263,29 +334,32 @@
     var AniLibria = {
         search: function (movie, onComplete, onError) {
             var network = new Lampa.Reguest();
-            var title = movie.title || movie.name || '';
-            var orig = movie.original_title || movie.original_name || '';
+            var title = Utils.getMovieTitle(movie);
+            var orig = Utils.getMovieOrigTitle(movie);
             var query = title || orig;
 
             if (!query) {
-                onError('Не указано название для поиска');
+                onError('Не указано название для поиска аниме');
                 return;
             }
 
-            var url = 'https://api.anilibria.app/api/v1/app/search/releases?query=' + encodeURIComponent(query);
+            var cleanQuery = Utils.cleanTitle(query);
+            var searchUrl = 'https://api.anilibria.app/api/v1/anime/releases/search?query=' + encodeURIComponent(cleanQuery);
+
             network.clear();
             network.timeout(12000);
-            network.silent(url, function (releases) {
-                if (releases && releases.length) {
+            network.silent(searchUrl, function (res) {
+                var releases = (res && res.data) || [];
+                if (releases.length > 0) {
                     AniLibria.filterMatches(releases, movie, onComplete, onError);
                 } else {
-                    // Пробуем поиск по оригинальному названию
                     if (orig && orig !== title) {
-                        var fallbackUrl = 'https://api.anilibria.app/api/v1/app/search/releases?query=' + encodeURIComponent(orig);
+                        var fbUrl = 'https://api.anilibria.app/api/v1/anime/releases/search?query=' + encodeURIComponent(Utils.cleanTitle(orig));
                         network.clear();
                         network.timeout(12000);
-                        network.silent(fallbackUrl, function (fbReleases) {
-                            if (fbReleases && fbReleases.length) {
+                        network.silent(fbUrl, function (fbRes) {
+                            var fbReleases = (fbRes && fbRes.data) || [];
+                            if (fbReleases.length > 0) {
                                 AniLibria.filterMatches(fbReleases, movie, onComplete, onError);
                             } else {
                                 onError('На AniLibria релиз "' + query + '" не найден (в базе только аниме)');
@@ -303,11 +377,10 @@
         },
 
         filterMatches: function (releases, movie, onComplete, onError) {
-            var targetTitle = movie.title || '';
-            var targetOrig = movie.original_title || '';
-            var targetYear = parseInt((movie.release_date || movie.first_air_date || '').slice(0, 4)) || 0;
+            var targetTitle = Utils.getMovieTitle(movie);
+            var targetOrig = Utils.getMovieOrigTitle(movie);
+            var targetYear = Utils.getMovieYear(movie);
 
-            // Строгая фильтрация по соответствию названию карточки
             var matched = releases.filter(function (rel) {
                 var ru = rel.name && rel.name.main;
                 var en = rel.name && rel.name.english;
@@ -326,7 +399,6 @@
             if (matched.length === 1) {
                 AniLibria.loadReleaseDetails(matched[0].id, movie, onComplete, onError);
             } else {
-                // Если нашлось несколько частей или сезонов, предлагаем выбор
                 var items = matched.map(function (rel) {
                     var rName = rel.name && rel.name.main || 'Релиз';
                     var epTotal = rel.episodes_total ? (' | ' + rel.episodes_total + ' эп.') : '';
@@ -386,7 +458,7 @@
 
                 playlist.push({
                     url: defaultStream,
-                    title: (release.name && release.name.main || movie.title) + ' - ' + epTitle,
+                    title: (release.name && release.name.main || Utils.getMovieTitle(movie)) + ' - ' + epTitle,
                     quality: qMap,
                     timeline: view,
                     episode: epNum
@@ -413,11 +485,11 @@
         search: function (movie, onComplete, onError) {
             var network = new Lampa.Reguest();
             var token = Kodik.getToken();
-            var title = movie.title || '';
-            var orig = movie.original_title || '';
+            var title = Utils.getMovieTitle(movie);
+            var orig = Utils.getMovieOrigTitle(movie);
             var kp_id = movie.kinopoisk_id || movie.kp_id;
             var imdb_id = movie.imdb_id;
-            var targetYear = parseInt((movie.release_date || movie.first_air_date || '').slice(0, 4)) || 0;
+            var targetYear = Utils.getMovieYear(movie);
 
             var params = 'token=' + token + '&limit=50&with_episodes=true';
             if (kp_id) params += '&kinopoisk_id=' + encodeURIComponent(kp_id);
@@ -425,7 +497,7 @@
             else if (title) params += '&title=' + encodeURIComponent(title);
             else if (orig) params += '&title=' + encodeURIComponent(orig);
             else {
-                onError('Не указано название или идентификатор фильма');
+                onError('Не указано название или идентификатор для Kodik');
                 return;
             }
 
@@ -435,7 +507,6 @@
             network.silent(url, function (res) {
                 var rawList = res && res.results ? res.results : [];
                 Kodik.filterStrict(rawList, movie, targetYear, onComplete, function () {
-                    // Если по прямому поиску ничего не прошло строгий фильтр, пробуем поиск по оригинальному названию
                     if (orig && orig !== title) {
                         var fbUrl = 'https://kodik-api.com/search?token=' + token + '&limit=50&with_episodes=true&title=' + encodeURIComponent(orig);
                         network.clear();
@@ -443,13 +514,13 @@
                         network.silent(fbUrl, function (fbRes) {
                             var fbList = fbRes && fbRes.results ? fbRes.results : [];
                             Kodik.filterStrict(fbList, movie, targetYear, onComplete, function () {
-                                onError('В базе Kodik релиз "' + (title || orig) + '" не найден');
+                                onError('В базе Kodik релиз "' + (title || orig) + '" не найден (Kodik содержит преимущественно аниме и дорамы)');
                             });
                         }, function () {
-                            onError('В базе Kodik релиз "' + (title || orig) + '" не найден');
+                            onError('В базе Kodik релиз "' + (title || orig) + '" не найден (Kodik содержит преимущественно аниме и дорамы)');
                         });
                     } else {
-                        onError('В базе Kodik релиз "' + (title || orig) + '" не найден');
+                        onError('В базе Kodik релиз "' + (title || orig) + '" не найден (Kodik содержит преимущественно аниме и дорамы)');
                     }
                 });
             }, function (a, c) {
@@ -457,10 +528,9 @@
             });
         },
 
-        // Строгая фильтрация результатов Kodik по названию
         filterStrict: function (results, movie, targetYear, onComplete, onEmpty) {
-            var targetTitle = movie.title || '';
-            var targetOrig = movie.original_title || '';
+            var targetTitle = Utils.getMovieTitle(movie);
+            var targetOrig = Utils.getMovieOrigTitle(movie);
 
             var filtered = results.filter(function (r) {
                 return Utils.isTitleMatch(r.title, r.title_orig, targetTitle, targetOrig, r.year, targetYear);
@@ -473,15 +543,13 @@
             }
         },
 
-        // Извлечение прямого m3u8 видеопотока через CORS-прокси
         extractStream: function (link, onStream, onError) {
             var fullUrl = Utils.fixLinkProtocol(link);
-            var proxiedUrl = CORS_PROXY + fullUrl;
+            var proxiedUrl = CORS_PROXIES[0] + fullUrl;
             var network = new Lampa.Reguest();
             network.clear();
             network.timeout(15000);
 
-            // 1. Получаем HTML страницы плеера Kodik
             network.native(proxiedUrl, function (html) {
                 html = (html || '').replace(/\n/g, '');
 
@@ -513,11 +581,10 @@
                     '&id=' + encodeURIComponent(videoId[1]) +
                     '&info=%7B%7D';
 
-                var gviUrl = CORS_PROXY + 'https://kodikplayer.com/ftor';
+                var gviUrl = CORS_PROXIES[0] + 'https://kodikplayer.com/ftor';
                 network.clear();
                 network.timeout(15000);
 
-                // 2. Отправляем POST запрос на /ftor для генерации m3u8 ссылок
                 network.native(gviUrl, function (data) {
                     var parsed = null;
                     try {
@@ -574,7 +641,7 @@
         getDevId: function () {
             var devId = Lampa.Storage.get('online_mod_filmix_dev_id', '');
             if (!devId) {
-                devId = '1a2b3c4d5e6f7a8b';
+                devId = Utils.randomHex(16);
                 Lampa.Storage.set('online_mod_filmix_dev_id', devId);
             }
             return devId;
@@ -617,33 +684,24 @@
         },
 
         search: function (movie, onComplete, onError) {
-            var network = new Lampa.Reguest();
-            var title = movie.title || movie.name || '';
-            var orig = movie.original_title || movie.original_name || '';
+            var title = Utils.getMovieTitle(movie);
+            var orig = Utils.getMovieOrigTitle(movie);
             var query = title || orig;
-            var targetYear = parseInt((movie.release_date || movie.first_air_date || '').slice(0, 4)) || 0;
+            var targetYear = Utils.getMovieYear(movie);
 
             if (!query) {
-                onError('Не указано название для поиска');
+                onError('Не указано название для поиска на Filmix');
                 return;
             }
 
             var searchApiUrl = 'http://filmixapp.cyou/api/v2/search' + Filmix.getApiParams() + '&story=' + encodeURIComponent(Utils.cleanTitle(query));
-            var proxyUrl = Utils.buildProxyUrl(searchApiUrl, 'search');
 
-            network.clear();
-            network.timeout(15000);
-            network.silent(proxyUrl, function (results) {
-                results = Utils.parseJson(results);
+            Utils.requestWithProxyFallback(searchApiUrl, 'search', function (results) {
                 var list = Array.isArray(results) ? results : [];
                 Filmix.filterStrict(list, movie, targetYear, onComplete, function () {
                     if (orig && orig !== title) {
                         var fbApiUrl = 'http://filmixapp.cyou/api/v2/search' + Filmix.getApiParams() + '&story=' + encodeURIComponent(Utils.cleanTitle(orig));
-                        var fbProxyUrl = Utils.buildProxyUrl(fbApiUrl, 'search');
-                        network.clear();
-                        network.timeout(15000);
-                        network.silent(fbProxyUrl, function (fbRes) {
-                            fbRes = Utils.parseJson(fbRes);
+                        Utils.requestWithProxyFallback(fbApiUrl, 'search', function (fbRes) {
                             var fbList = Array.isArray(fbRes) ? fbRes : [];
                             Filmix.filterStrict(fbList, movie, targetYear, onComplete, function () {
                                 onError('На Filmix релиз "' + (title || orig) + '" не найден');
@@ -655,14 +713,14 @@
                         onError('На Filmix релиз "' + (title || orig) + '" не найден');
                     }
                 });
-            }, function (a, c) {
-                onError('Filmix API недоступен: ' + network.errorDecode(a, c));
+            }, function (errMsg) {
+                onError('Filmix недоступен: ' + errMsg);
             });
         },
 
         filterStrict: function (list, movie, targetYear, onComplete, onNoStrict) {
-            var targetTitle = movie.title || movie.name || '';
-            var targetOrig = movie.original_title || movie.original_name || '';
+            var targetTitle = Utils.getMovieTitle(movie);
+            var targetOrig = Utils.getMovieOrigTitle(movie);
 
             var matched = list.filter(function (item) {
                 var itemTitle = item.title || '';
@@ -672,7 +730,14 @@
                 return Utils.isTitleMatch(itemTitle, itemOrig, targetTitle, targetOrig, itemYear, targetYear);
             });
 
-            if (matched.length > 0) {
+            var normTarget = Utils.normalizeTitle(targetTitle);
+            var exacts = matched.filter(function (item) {
+                return Utils.normalizeTitle(item.title) === normTarget || Utils.normalizeTitle(item.original_title) === normTarget;
+            });
+
+            if (exacts.length > 0) {
+                onComplete(exacts);
+            } else if (matched.length > 0) {
                 onComplete(matched);
             } else {
                 onNoStrict();
@@ -680,49 +745,64 @@
         },
 
         loadDetails: function (postId, onComplete, onError) {
-            var network = new Lampa.Reguest();
             var postApiUrl = 'http://filmixapp.cyou/api/v2/post/' + postId + Filmix.getApiParams();
-            var proxyUrl = Utils.buildProxyUrl(postApiUrl, 'post');
 
-            network.clear();
-            network.timeout(15000);
-            network.silent(proxyUrl, function (post) {
-                post = Utils.parseJson(post);
-                if (post && post.player_links) {
-                    onComplete(post);
-                } else {
-                    onError('У фильма на Filmix нет ссылок для воспроизведения');
-                }
-            }, function (a, c) {
-                onError('Ошибка загрузки данных фильма с Filmix: ' + network.errorDecode(a, c));
+            Utils.requestWithProxyFallback(postApiUrl, 'post', function (post) {
+                if (typeof post === 'string') post = Utils.parseJson(post) || {};
+                if (post && post.post) post = post.post;
+                if (post && post.data) post = post.data;
+
+                var pl = (post && post.player_links) || {};
+                if (typeof pl === 'string') pl = Utils.parseJson(pl) || {};
+
+                var playlist = pl.playlist;
+                if (typeof playlist === 'string') playlist = Utils.parseJson(playlist) || {};
+
+                var movieData = pl.movie;
+                if (typeof movieData === 'string') movieData = Utils.parseJson(movieData) || [];
+
+                post.player_links = {
+                    playlist: playlist || {},
+                    movie: movieData || []
+                };
+
+                onComplete(post);
+            }, function (errMsg) {
+                onError('Ошибка загрузки данных с Filmix: ' + errMsg);
             });
         }
     };
 
     // ==========================================
-    // 5. Collaps API источник
+    // 5. Collaps API источник (HLS, мульти-аудио)
     // ==========================================
     var Collaps = {
         getKpId: function (movie, callback) {
             if (movie.kinopoisk_id || movie.kp_id) {
                 return callback(movie.kinopoisk_id || movie.kp_id);
             }
-            var query = movie.title || movie.name || '';
+            var query = Utils.getMovieTitle(movie);
             if (!query) return callback(null);
 
             var network = new Lampa.Reguest();
             var url = 'https://kinopoiskapiunofficial.tech/api/v2.1/films/search-by-keyword?keyword=' + encodeURIComponent(Utils.cleanTitle(query));
             network.clear();
-            network.timeout(10000);
+            network.timeout(8000);
             network.silent(url, function (res) {
                 res = Utils.parseJson(res);
                 var films = (res && res.films) || [];
-                var targetYear = parseInt((movie.release_date || movie.first_air_date || '').slice(0, 4)) || 0;
+                var targetTitle = Utils.getMovieTitle(movie);
+                var targetOrig = Utils.getMovieOrigTitle(movie);
+                var targetYear = Utils.getMovieYear(movie);
                 var match = films.find(function (f) {
-                    return Utils.isTitleMatch(f.nameRu, f.nameEn, movie.title, movie.original_title, f.year, targetYear);
+                    return Utils.isTitleMatch(f.nameRu, f.nameEn, targetTitle, targetOrig, f.year, targetYear);
                 }) || films[0];
 
-                callback(match ? match.filmId : null);
+                var foundId = match ? match.filmId : null;
+                if (foundId) {
+                    movie.kinopoisk_id = foundId;
+                }
+                callback(foundId);
             }, function () {
                 callback(null);
             }, false, {
@@ -734,52 +814,72 @@
 
         search: function (movie, onComplete, onError) {
             var imdb_id = movie.imdb_id;
+            var kp_id = movie.kinopoisk_id || movie.kp_id;
 
-            function tryFetch(url, fallbackUrl) {
-                var network = new Lampa.Reguest();
-                network.clear();
-                network.timeout(15000);
-                network.native(url, function (html) {
-                    if (typeof html !== 'string') html = String(html || '');
-                    var match = html.match(/makePlayer\(({.*?})\);/s);
-                    if (match) {
-                        try {
-                            var json = eval('(' + match[1] + ')');
-                            if (json && (json.playlist || json.source || json.hls)) {
-                                return onComplete(json);
-                            }
-                        } catch (e) {}
+            function fetchCollaps(apiPath, fallbackApiPath, onDone, onFail) {
+                var mirrors = [
+                    'https://api.kinogram.best/embed/' + apiPath,
+                    'https://api.ortified.ws/embed/' + apiPath
+                ];
+                var mIdx = 0;
+
+                function nextMirror() {
+                    if (mIdx >= mirrors.length) {
+                        if (fallbackApiPath) {
+                            return fetchCollaps(fallbackApiPath, null, onDone, onFail);
+                        }
+                        return onFail();
                     }
-                    if (fallbackUrl) {
-                        tryFetch(fallbackUrl, null);
-                    } else {
-                        onError('Видео в Collaps не найдено');
-                    }
-                }, function () {
-                    if (fallbackUrl) {
-                        tryFetch(fallbackUrl, null);
-                    } else {
-                        onError('Ошибка подключения к Collaps');
-                    }
-                }, false, {
-                    headers: {
-                        'Referer': 'https://api.ortified.ws/'
-                    }
-                });
+
+                    var currentUrl = mirrors[mIdx++];
+                    var network = new Lampa.Reguest();
+                    network.clear();
+                    network.timeout(8000);
+                    network.native(currentUrl, function (html) {
+                        if (typeof html !== 'string') html = String(html || '');
+                        var match = html.match(/makePlayer\(({.*?})\);/s);
+                        if (match) {
+                            try {
+                                var json = eval('(' + match[1] + ')');
+                                if (json && (json.playlist || json.source || json.hls)) {
+                                    return onDone(json);
+                                }
+                            } catch (e) {}
+                        }
+                        nextMirror();
+                    }, function () {
+                        nextMirror();
+                    });
+                }
+
+                nextMirror();
             }
 
-            if (imdb_id) {
-                var url1 = 'https://api.ortified.ws/embed/imdb/' + imdb_id;
-                var url2 = 'https://api.kinogram.best/embed/imdb/' + imdb_id;
-                tryFetch(url1, url2);
+            if (kp_id) {
+                var fbPath = imdb_id ? ('imdb/' + imdb_id) : null;
+                fetchCollaps('kp/' + kp_id, fbPath, onComplete, function () {
+                    onError('В Collaps видеопотоки для этого релиза не найдены');
+                });
+            } else if (imdb_id) {
+                fetchCollaps('imdb/' + imdb_id, null, onComplete, function () {
+                    Collaps.getKpId(movie, function (foundKp) {
+                        if (foundKp) {
+                            fetchCollaps('kp/' + foundKp, null, onComplete, function () {
+                                onError('В Collaps видеопотоки для этого релиза не найдены');
+                            });
+                        } else {
+                            onError('В Collaps видеопотоки для этого релиза не найдены');
+                        }
+                    });
+                });
             } else {
-                Collaps.getKpId(movie, function (kp_id) {
-                    if (kp_id) {
-                        var url1 = 'https://api.ortified.ws/embed/kp/' + kp_id;
-                        var url2 = 'https://api.kinogram.best/embed/kp/' + kp_id;
-                        tryFetch(url1, url2);
+                Collaps.getKpId(movie, function (foundKp) {
+                    if (foundKp) {
+                        fetchCollaps('kp/' + foundKp, null, onComplete, function () {
+                            onError('В Collaps видеопотоки для этого релиза не найдены');
+                        });
                     } else {
-                        onError('Не удалось определить Kinopoisk или IMDB ID для Collaps');
+                        onError('Не удалось определить Кинопоиск или IMDB ID для Collaps');
                     }
                 });
             }
@@ -798,20 +898,16 @@
         },
 
         search: function (movie, onComplete, onError) {
-            var query = movie.title || movie.name || movie.original_title || '';
-            if (!query) return onError('Не указано название для поиска');
+            var query = Utils.getMovieTitle(movie) || Utils.getMovieOrigTitle(movie);
+            if (!query) return onError('Не указано название для поиска на HDRezka');
 
             var mirror = Rezka.getMirror();
             var searchUrl = mirror + '/search/?do=search&subaction=search&q=' + encodeURIComponent(Utils.cleanTitle(query));
-            var proxyUrl = Utils.buildProxyUrl(searchUrl, 'rezka_search');
 
-            var network = new Lampa.Reguest();
-            network.clear();
-            network.timeout(15000);
-            network.native(proxyUrl, function (html) {
+            Utils.requestWithProxyFallback(searchUrl, 'rezka_search', function (html) {
                 if (typeof html !== 'string') html = String(html || '');
                 if (html.indexOf('check-form') !== -1 || html.indexOf('<title>Вход</title>') !== -1) {
-                    return onError('HDRezka требует авторизации на зеркале ' + mirror + '. Рекомендуется использовать Collaps или Filmix (все озвучки HDRezka доступны там без авторизации).');
+                    return onError('HDRezka требует авторизации на зеркале ' + mirror + '. Рекомендуется использовать Collaps (все озвучки HDRezka доступны без авторизации).');
                 }
 
                 var regex = /<div class="b-content__inline_item"[^>]*data-id="(\d+)"[^>]*>[\s\S]*?<a href="([^"]+)">([^<]+)<\/a>[\s\S]*?<div>([^<]*)<\/div>/g;
@@ -831,17 +927,17 @@
                 } else {
                     onError('В HDRezka релиз не найден');
                 }
-            }, function (a, c) {
-                onError('Ошибка подключения к HDRezka: ' + network.errorDecode(a, c));
+            }, function (errMsg) {
+                onError('Ошибка подключения к HDRezka: ' + errMsg);
             });
         }
     };
 
     // ==========================================
-    // UI: Открытие модального меню «Онлайн»
+    // UI: Меню «Онлайн» источников
     // ==========================================
     function openOnlineMenu(movie) {
-        var movieTitle = movie.title || movie.name || '';
+        var movieTitle = Utils.getMovieTitle(movie);
         var items = [
             {
                 title: Lampa.Lang.translate('online_mod_collaps'),
@@ -855,7 +951,7 @@
             },
             {
                 title: Lampa.Lang.translate('online_mod_kodik'),
-                subtitle: 'Поиск по базе фильмов, сериалов и мультфильмов',
+                subtitle: 'Каталог аниме, дорам и сериалов',
                 action: 'kodik'
             },
             {
@@ -937,7 +1033,7 @@
         });
 
         Lampa.Select.show({
-            title: (movie.title || '') + ' - ' + Lampa.Lang.translate('online_mod_select_season'),
+            title: Utils.getMovieTitle(movie) + ' - ' + Lampa.Lang.translate('online_mod_select_season'),
             items: items,
             onSelect: function (sel) {
                 selectCollapsEpisode(data, sel.seasonObj, movie);
@@ -983,6 +1079,7 @@
     function playCollapsSeries(data, seasonObj, startIndex, movie) {
         var episodes = seasonObj.episodes || [];
         var playlist = [];
+        var mainTitle = Utils.getMovieTitle(movie);
 
         episodes.forEach(function (ep, idx) {
             var epNum = ep.episode || (idx + 1);
@@ -993,7 +1090,7 @@
 
             playlist.push({
                 url: streamUrl,
-                title: (movie.title || '') + ' - S' + seasonObj.season + 'E' + epNum + audios,
+                title: mainTitle + ' - S' + seasonObj.season + 'E' + epNum + audios,
                 timeline: view,
                 episode: parseInt(epNum)
             });
@@ -1022,7 +1119,7 @@
 
         var item = {
             url: streamUrl,
-            title: (movie.title || '') + audios,
+            title: Utils.getMovieTitle(movie) + audios,
             timeline: view
         };
 
@@ -1046,10 +1143,10 @@
             });
 
             Lampa.Select.show({
-                title: (movie.title || '') + ' - HDRezka',
+                title: Utils.getMovieTitle(movie) + ' - HDRezka',
                 items: items,
                 onSelect: function () {
-                    Lampa.Noty.show('Для мгновенного просмотра без авторизации используйте Collaps или Filmix (включают все озвучки HDRezka)');
+                    Lampa.Noty.show('Для мгновенного просмотра без авторизации используйте Collaps (все озвучки HDRezka доступны там)');
                 },
                 onBack: function () {
                     openOnlineMenu(movie);
@@ -1087,7 +1184,7 @@
                 });
 
                 Lampa.Select.show({
-                    title: (movie.title || '') + ' - ' + Lampa.Lang.translate('online_mod_select_release'),
+                    title: Utils.getMovieTitle(movie) + ' - ' + Lampa.Lang.translate('online_mod_select_release'),
                     items: items,
                     onSelect: function (sel) {
                         loadFilmixPostDetails(sel.postId, movie, sel.resTitle);
@@ -1106,26 +1203,27 @@
         Lampa.Noty.show(Lampa.Lang.translate('online_mod_searching'));
 
         Filmix.loadDetails(postId, function (post) {
-            post = Utils.parseJson(post);
             var pl = (post && post.player_links) || {};
-            var hasPlaylist = pl.playlist && typeof pl.playlist === 'object' && Object.keys(pl.playlist).length > 0;
-            var hasMovie = pl.movie && (Array.isArray(pl.movie) ? pl.movie.length > 0 : (typeof pl.movie === 'object' && Object.keys(pl.movie).length > 0));
+            var playlist = pl.playlist || {};
+            var movieData = pl.movie || [];
+
+            var hasPlaylist = Utils.countKeys(playlist) > 0;
+            var hasMovie = Utils.countKeys(movieData) > 0;
 
             if (hasPlaylist) {
                 showFilmixSeries(post, movie, releaseTitle);
             } else if (hasMovie) {
                 showFilmixMovie(post, movie, releaseTitle);
             } else {
-                Lampa.Noty.show('У релиза нет доступных видеопотоков на Filmix');
+                Lampa.Noty.show('На Filmix нет доступных видеопотоков (попробуйте Collaps)');
             }
         }, function (err) {
             Lampa.Noty.show(err || 'Ошибка загрузки релиза Filmix');
         });
     }
 
-    // Выбор сезона Filmix для сериалов
     function showFilmixSeries(post, movie, releaseTitle) {
-        var playlist = post.player_links.playlist || {};
+        var playlist = (post.player_links && post.player_links.playlist) || {};
         var seasonKeys = Object.keys(playlist).sort(function (a, b) {
             return parseInt(a) - parseInt(b);
         });
@@ -1142,7 +1240,7 @@
 
         var seasonItems = seasonKeys.map(function (sKey) {
             var transObj = playlist[sKey] || {};
-            var transCount = Object.keys(transObj).length;
+            var transCount = Utils.countKeys(transObj);
             return {
                 title: 'Сезон ' + sKey,
                 subtitle: 'Переводов / озвучек: ' + transCount,
@@ -1151,7 +1249,7 @@
         });
 
         Lampa.Select.show({
-            title: (releaseTitle || post.title || movie.title) + ' - ' + Lampa.Lang.translate('online_mod_select_season'),
+            title: (releaseTitle || post.title || Utils.getMovieTitle(movie)) + ' - ' + Lampa.Lang.translate('online_mod_select_season'),
             items: seasonItems,
             onSelect: function (sel) {
                 selectFilmixTranslation(post, sel.seasonKey, movie, releaseTitle);
@@ -1162,7 +1260,6 @@
         });
     }
 
-    // Выбор перевода / озвучки Filmix
     function selectFilmixTranslation(post, seasonKey, movie, releaseTitle) {
         var seasonObj = (post.player_links.playlist || {})[seasonKey] || {};
         var transKeys = Object.keys(seasonObj);
@@ -1179,7 +1276,7 @@
 
         var transItems = transKeys.map(function (tKey) {
             var epObj = seasonObj[tKey] || {};
-            var epCount = Array.isArray(epObj) ? epObj.length : Object.keys(epObj).length;
+            var epCount = Utils.countKeys(epObj);
             return {
                 title: tKey,
                 subtitle: 'Доступно серий: ' + epCount,
@@ -1199,7 +1296,6 @@
         });
     }
 
-    // Выбор серии Filmix
     function selectFilmixEpisode(post, seasonKey, transKey, movie, releaseTitle) {
         var seasonObj = (post.player_links.playlist || {})[seasonKey] || {};
         var epObj = seasonObj[transKey] || {};
@@ -1238,13 +1334,13 @@
         });
     }
 
-    // Воспроизведение серии Filmix
     function playFilmixEpisode(post, seasonKey, transKey, epKeys, startEpKey, movie, releaseTitle) {
         var seasonObj = (post.player_links.playlist || {})[seasonKey] || {};
         var epObj = seasonObj[transKey] || {};
         var isArray = Array.isArray(epObj);
         var playlist = [];
         var startIndex = 0;
+        var mainTitle = releaseTitle || post.title || Utils.getMovieTitle(movie);
 
         epKeys.forEach(function (eKey, idx) {
             if (eKey === startEpKey) startIndex = idx;
@@ -1262,7 +1358,7 @@
 
             playlist.push({
                 url: defaultStream,
-                title: (releaseTitle || post.title || movie.title) + ' - S' + seasonKey + 'E' + eKey + ' (' + transKey + ')',
+                title: mainTitle + ' - S' + seasonKey + 'E' + eKey + ' (' + transKey + ')',
                 quality: qualityMap,
                 timeline: view,
                 episode: parseInt(eKey) || (idx + 1)
@@ -1277,9 +1373,8 @@
         Lampa.Player.playlist(playlist);
     }
 
-    // Обработка фильма Filmix
     function showFilmixMovie(post, movie, releaseTitle) {
-        var rawMovie = post.player_links.movie || [];
+        var rawMovie = (post.player_links && post.player_links.movie) || [];
         var transList = [];
 
         if (Array.isArray(rawMovie)) {
@@ -1314,7 +1409,7 @@
         });
 
         Lampa.Select.show({
-            title: (releaseTitle || post.title || movie.title) + ' - ' + Lampa.Lang.translate('online_mod_select_voice'),
+            title: (releaseTitle || post.title || Utils.getMovieTitle(movie)) + ' - ' + Lampa.Lang.translate('online_mod_select_voice'),
             items: transItems,
             onSelect: function (sel) {
                 playFilmixMovie(post, sel.tItem, movie, releaseTitle);
@@ -1325,7 +1420,6 @@
         });
     }
 
-    // Воспроизведение фильма Filmix
     function playFilmixMovie(post, tItem, movie, releaseTitle) {
         var quals = Filmix.extractQualities(tItem);
         var qualityMap = {};
@@ -1342,7 +1436,7 @@
 
         var item = {
             url: defaultStream,
-            title: (releaseTitle || post.title || movie.title) + ' (' + voiceName + ')',
+            title: (releaseTitle || post.title || Utils.getMovieTitle(movie)) + ' (' + voiceName + ')',
             quality: qualityMap,
             timeline: view
         };
@@ -1351,7 +1445,9 @@
         Lampa.Player.playlist([item]);
     }
 
+    // ==========================================
     // Обработка AniLibria
+    // ==========================================
     function handleAniLibria(movie) {
         Lampa.Noty.show(Lampa.Lang.translate('online_mod_searching'));
 
@@ -1363,10 +1459,8 @@
             }
 
             if (episodes.length === 1) {
-                // Если всего одна серия / фильм
                 AniLibria.playRelease(release, movie, 0);
             } else {
-                // Меню выбора серии
                 var epItems = episodes.map(function (ep, idx) {
                     var epNum = ep.ordinal !== undefined ? ep.ordinal : (idx + 1);
                     var epHash = Utils.buildCardHash(movie, '_anilibria_s1_e' + epNum);
@@ -1380,7 +1474,7 @@
                 });
 
                 Lampa.Select.show({
-                    title: (release.name && release.name.main || movie.title) + ' - ' + Lampa.Lang.translate('online_mod_select_episode'),
+                    title: (release.name && release.name.main || Utils.getMovieTitle(movie)) + ' - ' + Lampa.Lang.translate('online_mod_select_episode'),
                     items: epItems,
                     onSelect: function (selected) {
                         AniLibria.playRelease(release, movie, selected.index);
@@ -1395,7 +1489,9 @@
         });
     }
 
+    // ==========================================
     // Обработка Kodik
+    // ==========================================
     function handleKodik(movie) {
         Lampa.Noty.show(Lampa.Lang.translate('online_mod_searching'));
 
@@ -1405,7 +1501,6 @@
                 return;
             }
 
-            // Группировка вариантов переводов / озвучек
             var voiceItems = results.map(function (res, idx) {
                 var voiceName = res.translation ? (res.translation.title || 'Стандартная озвучка') : 'Оригинал';
                 var voiceType = res.translation && res.translation.type ? (' (' + res.translation.type + ')') : '';
@@ -1414,18 +1509,17 @@
 
                 return {
                     title: voiceName + voiceType,
-                    subtitle: (res.title || movie.title) + (res.year ? (' (' + res.year + ')') : '') + epCountInfo,
+                    subtitle: (res.title || Utils.getMovieTitle(movie)) + (res.year ? (' (' + res.year + ')') : '') + epCountInfo,
                     raw: res,
                     index: idx
                 };
             });
 
             if (voiceItems.length === 1 && !voiceItems[0].raw.seasons) {
-                // Один результат и это фильм
                 playKodikItem(voiceItems[0].raw, movie, voiceItems[0].title);
             } else {
                 Lampa.Select.show({
-                    title: (movie.title || '') + ' - ' + Lampa.Lang.translate('online_mod_select_voice'),
+                    title: Utils.getMovieTitle(movie) + ' - ' + Lampa.Lang.translate('online_mod_select_voice'),
                     items: voiceItems,
                     onSelect: function (selVoice) {
                         var chosen = selVoice.raw;
@@ -1445,7 +1539,6 @@
         });
     }
 
-    // Выбор сезона Kodik
     function selectKodikSeason(chosen, movie, voiceTitle) {
         var seasonsKeys = Object.keys(chosen.seasons || {});
         if (!seasonsKeys.length) {
@@ -1469,7 +1562,7 @@
         });
 
         Lampa.Select.show({
-            title: (movie.title || chosen.title) + ' - ' + Lampa.Lang.translate('online_mod_select_season'),
+            title: (chosen.title || Utils.getMovieTitle(movie)) + ' - ' + Lampa.Lang.translate('online_mod_select_season'),
             items: seasonItems,
             onSelect: function (selSeason) {
                 selectKodikEpisode(chosen, selSeason.seasonKey, movie, voiceTitle);
@@ -1480,7 +1573,6 @@
         });
     }
 
-    // Выбор серии Kodik
     function selectKodikEpisode(chosen, seasonKey, movie, voiceTitle) {
         var season = chosen.seasons[seasonKey];
         var epObj = season && season.episodes ? season.episodes : {};
@@ -1513,7 +1605,7 @@
                     Utils.markViewed(hash);
                     var item = {
                         url: bestUrl,
-                        title: (movie.title || chosen.title) + ' - S' + seasonKey + 'E' + selEp.epKey + ' (' + voiceTitle + ')',
+                        title: (chosen.title || Utils.getMovieTitle(movie)) + ' - S' + seasonKey + 'E' + selEp.epKey + ' (' + voiceTitle + ')',
                         quality: qualityMap,
                         timeline: Lampa.Timeline.view(hash)
                     };
@@ -1529,7 +1621,6 @@
         });
     }
 
-    // Воспроизведение фильма Kodik
     function playKodikItem(chosen, movie, voiceTitle) {
         var hash = Utils.buildCardHash(movie, '_kodik_movie');
         Lampa.Noty.show(Lampa.Lang.translate('online_mod_searching'));
@@ -1538,7 +1629,7 @@
             Utils.markViewed(hash);
             var item = {
                 url: bestUrl,
-                title: (movie.title || chosen.title) + ' (' + voiceTitle + ')',
+                title: (chosen.title || Utils.getMovieTitle(movie)) + ' (' + voiceTitle + ')',
                 quality: qualityMap,
                 timeline: Lampa.Timeline.view(hash)
             };
@@ -1558,7 +1649,6 @@
                 var activityRender = e.object.activity.render();
                 var movie = e.data.movie;
 
-                // Проверка, нет ли уже кнопки
                 if (activityRender.find('.view--online-mod').length) return;
 
                 var buttonHtml = '<div class="full-start__button selector view--online-mod" style="margin-left: 0.5em;">' +
@@ -1605,7 +1695,6 @@
         initSettings();
         addButtonToMovieCard();
 
-        // Регистрация в манифесте и плагинах Lampa
         if (Lampa.Plugins && Lampa.Plugins.add) {
             Lampa.Plugins.add({
                 name: PLUGIN_NAME,
