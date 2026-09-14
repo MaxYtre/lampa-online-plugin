@@ -379,7 +379,7 @@ function testMovieProvider(pluginCode, movie, targetProvider) {
 
         click();
 
-        // Wait up to 6 seconds for async resolution of streams
+        // Wait up to 8 seconds for async resolution of streams
         const checkInterval = 100;
         let waited = 0;
         const timer = setInterval(async () => {
@@ -394,7 +394,7 @@ function testMovieProvider(pluginCode, movie, targetProvider) {
                     streamCheck,
                     notyMessages
                 });
-            } else if (waited >= 6000) {
+            } else if (waited >= 8000) {
                 clearInterval(timer);
                 resolve({
                     provider: targetProvider,
@@ -420,7 +420,7 @@ const DEFAULT_TEST_CASES = [
             kinopoisk_id: 161252,
             imdb_id: 'tt0121955'
         },
-        providers: ['collaps', 'filmix', 'kodik', 'rezka']
+        providers: ['bwa', 'collaps', 'filmix', 'kodik', 'rezka']
     },
     {
         name: 'Интерстеллар (Interstellar)',
@@ -433,7 +433,7 @@ const DEFAULT_TEST_CASES = [
             kinopoisk_id: 258687,
             imdb_id: 'tt0816692'
         },
-        providers: ['collaps', 'filmix']
+        providers: ['bwa', 'collaps', 'filmix']
     },
     {
         name: 'Атака титанов (Attack on Titan)',

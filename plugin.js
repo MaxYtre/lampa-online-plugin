@@ -5,7 +5,7 @@
     window.plugin_online_mod_ready = true;
 
     var PLUGIN_NAME = 'Online Mod';
-    var PLUGIN_VERSION = '1.3.0';
+    var PLUGIN_VERSION = '1.4.0';
     var KODIK_TOKEN_DEFAULT = '41dd95f84c21719b09d6c71182237a25';
     var TEST_STREAM_URL = 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
     var CORS_PROXIES = [
@@ -38,6 +38,16 @@
                 ru: 'Источники онлайн',
                 en: 'Online Sources',
                 uk: 'Джерела онлайн'
+            },
+            online_mod_bwa: {
+                ru: '⚡ BWA Мульти-балансер (VeoVeo, Zetflix, HDRezka, VideoDB)',
+                en: '⚡ BWA Multi-Source (VeoVeo, Zetflix, HDRezka, VideoDB)',
+                uk: '⚡ BWA Мульти-балансер (VeoVeo, Zetflix, HDRezka, VideoDB)'
+            },
+            online_mod_bwa_desc: {
+                ru: '16+ проверенных источников через быстрый прокси-сервер BWA, без блокировок на ТВ',
+                en: '16+ verified sources via BWA fast proxy server, no blocks on TV',
+                uk: '16+ перевірених джерел через швидкий проксі-сервер BWA, без блокувань на ТВ'
             },
             online_mod_collaps: {
                 ru: '⚡ Collaps (HLS, Paramount, Кубик, Rezka, LostFilm)',
@@ -139,6 +149,13 @@
             if (!movie) return 0;
             var d = movie.release_date || movie.first_air_date || movie.last_air_date || movie.year || '';
             return parseInt(String(d).slice(0, 4)) || 0;
+        },
+        isSerial: function (movie) {
+            if (!movie) return false;
+            if (movie.serial !== undefined) return !!movie.serial;
+            if (movie.first_air_date || movie.number_of_seasons || (movie.seasons && movie.seasons.length)) return true;
+            if (movie.name && !movie.title) return true;
+            return false;
         },
         cleanTitle: function (str) {
             return (str || '').replace(/[\s.,:;’'`!?()\[\]\-_\\/]+/g, ' ').trim();
@@ -936,12 +953,333 @@
         }
     };
 
+
+    // ==========================================
+    // 7. BWA Мульти-балансер (16+ источников)
+    // ==========================================
+    var BWA = {
+        getServers: function () {
+            var custom = Lampa.Storage.get('online_mod_bwa_server', '');
+            if (custom) return [custom.replace(/\/+$/, '') + '/'];
+            return [
+                'https://app.bwa.ad/',
+                'https://rust.bwa.ad/'
+            ];
+        },
+
+        getKey: function () {
+            var key = Lampa.Storage.get('bwa_kitkey', '');
+            if (!key) {
+                key = (Utils.randomHex ? Utils.randomHex(16) : Math.random().toString(36).substring(2)) + Date.now().toString(36);
+                Lampa.Storage.set('bwa_kitkey', key);
+            }
+            return key;
+        },
+
+        buildQueryParams: function (movie, extra) {
+            var params = [];
+            function add(k, v) {
+                if (v !== undefined && v !== null && v !== '') {
+                    params.push(k + '=' + encodeURIComponent(v));
+                }
+            }
+            add('id', movie.id);
+            add('imdb_id', movie.imdb_id);
+            add('kinopoisk_id', movie.kinopoisk_id || movie.kp_id);
+            add('title', Utils.getMovieTitle(movie));
+            add('original_title', Utils.getMovieOrigTitle(movie));
+            add('serial', Utils.isSerial(movie) ? 1 : 0);
+            add('year', Utils.getMovieYear(movie));
+            add('rchtype', 'cors');
+            if (extra) {
+                for (var k in extra) {
+                    add(k, extra[k]);
+                }
+            }
+            return params.join('&');
+        },
+
+        getEvents: function (movie, onComplete, onError) {
+            var servers = BWA.getServers();
+            var query = BWA.buildQueryParams(movie);
+            var sIdx = 0;
+
+            function tryServer() {
+                if (sIdx >= servers.length) {
+                    return onError('Серверы BWA в данный момент недоступны');
+                }
+                var baseHost = servers[sIdx++];
+                var sUrl = baseHost + 'lite/events?' + query;
+                var network = new Lampa.Reguest();
+                network.clear();
+                network.timeout(10000);
+                network.silent(sUrl, function (list) {
+                    var balancers = Array.isArray(list) ? list : [];
+                    balancers = balancers.filter(function (b) {
+                        return b && b.balanser && b.balanser !== 'example';
+                    });
+                    if (balancers.length) {
+                        onComplete(balancers, baseHost);
+                    } else {
+                        tryServer();
+                    }
+                }, function () {
+                    tryServer();
+                }, false, {
+                    headers: {
+                        'x-kit-key': BWA.getKey()
+                    }
+                });
+            }
+
+            if (!movie.kinopoisk_id && !movie.kp_id && !movie.imdb_id) {
+                Collaps.getKpId(movie, function (kId) {
+                    query = BWA.buildQueryParams(movie);
+                    tryServer();
+                });
+            } else {
+                tryServer();
+            }
+        },
+
+        loadStreams: function (serverUrl, balancer, movie, season, episode, onComplete, onError) {
+            var extra = {};
+            if (season) extra.season = season;
+            if (episode) extra.episode = episode;
+            var query = BWA.buildQueryParams(movie, extra);
+            var baseHost = serverUrl || 'https://app.bwa.ad/';
+            var url = baseHost + 'lite/' + balancer + '?' + query;
+
+            var network = new Lampa.Reguest();
+            network.clear();
+            network.timeout(12000);
+            network.silent(url, function (data) {
+                data = Utils.parseJson(data) || data || {};
+                var rawStreams = data.streams || [];
+                var streams = [];
+
+                rawStreams.forEach(function (s) {
+                    if (!s || !s.url) return;
+                    var fullUrl = s.url;
+                    if (fullUrl.indexOf('://') === -1) {
+                        fullUrl = baseHost.replace(/\/+$/, '') + (fullUrl.charAt(0) === '/' ? '' : '/') + fullUrl;
+                    }
+                    streams.push({
+                        url: fullUrl,
+                        voice: s.voice || 'Стандартная дорожка',
+                        quality: s.quality || '1080p',
+                        kind: s.kind || 'hls'
+                    });
+                });
+
+                if (streams.length) {
+                    onComplete(streams, data);
+                } else {
+                    onError('В источнике ' + balancer + ' нет доступных потоков (попробуйте другой источник BWA)');
+                }
+            }, function (a, c) {
+                onError('Ошибка загрузки потоков BWA: ' + network.errorDecode(a, c));
+            }, false, {
+                headers: {
+                    'x-kit-key': BWA.getKey()
+                }
+            });
+        }
+    };
+
+    // ==========================================
+    // Обработка BWA Мульти-балансера
+    // ==========================================
+    function handleBwa(movie) {
+        Lampa.Noty.show(Lampa.Lang.translate('online_mod_searching'));
+
+        BWA.getEvents(movie, function (balancers, serverUrl) {
+            if (!balancers.length) {
+                Lampa.Noty.show('На BWA не найдено доступных источников');
+                return;
+            }
+
+            var items = balancers.map(function (b) {
+                var qualityBadge = b.uhd ? ' [4K UHD / 1080p]' : ' [1080p Full HD]';
+                var status = b.kit && !b.bound ? ' (требуется привязка)' : ' (прямой HLS поток)';
+                return {
+                    title: b.name + qualityBadge,
+                    subtitle: 'Источник ' + b.name + status,
+                    balancerObj: b,
+                    serverUrl: serverUrl
+                };
+            });
+
+            Lampa.Select.show({
+                title: Utils.getMovieTitle(movie) + ' - Источники BWA',
+                items: items,
+                onSelect: function (sel) {
+                    openBwaBalancer(movie, sel.balancerObj, sel.serverUrl);
+                },
+                onBack: function () {
+                    openOnlineMenu(movie);
+                }
+            });
+        }, function (err) {
+            Lampa.Noty.show(err || 'BWA недоступен');
+        });
+    }
+
+    function openBwaBalancer(movie, balancerObj, serverUrl) {
+        if (Utils.isSerial(movie)) {
+            showBwaSeasons(movie, balancerObj, serverUrl);
+        } else {
+            loadBwaMovieStreams(movie, balancerObj, serverUrl);
+        }
+    }
+
+    function showBwaSeasons(movie, balancerObj, serverUrl) {
+        var seasonCount = movie.number_of_seasons || (movie.seasons && movie.seasons.length) || 28;
+        var items = [];
+        for (var s = 1; s <= seasonCount; s++) {
+            items.push({
+                title: 'Сезон ' + s,
+                subtitle: 'Выбор серии',
+                seasonNum: s
+            });
+        }
+
+        Lampa.Select.show({
+            title: Utils.getMovieTitle(movie) + ' - ' + balancerObj.name + ' - Сезоны',
+            items: items,
+            onSelect: function (sel) {
+                showBwaEpisodes(movie, balancerObj, serverUrl, sel.seasonNum);
+            },
+            onBack: function () {
+                handleBwa(movie);
+            }
+        });
+    }
+
+    function showBwaEpisodes(movie, balancerObj, serverUrl, seasonNum) {
+        var epCount = 25;
+        var items = [];
+        for (var e = 1; e <= epCount; e++) {
+            var epHash = Utils.buildCardHash(movie, '_bwa_' + balancerObj.balanser + '_s' + seasonNum + '_e' + e);
+            var isSeen = Utils.isViewed(epHash);
+            items.push({
+                title: (isSeen ? '✓ ' : '') + 'Серия ' + e,
+                subtitle: 'Сезон ' + seasonNum + ' (' + balancerObj.name + ')',
+                epNum: e
+            });
+        }
+
+        Lampa.Select.show({
+            title: 'Сезон ' + seasonNum + ' - ' + Lampa.Lang.translate('online_mod_select_episode'),
+            items: items,
+            onSelect: function (sel) {
+                loadBwaEpisodeStreams(movie, balancerObj, serverUrl, seasonNum, sel.epNum);
+            },
+            onBack: function () {
+                showBwaSeasons(movie, balancerObj, serverUrl);
+            }
+        });
+    }
+
+    function loadBwaEpisodeStreams(movie, balancerObj, serverUrl, seasonNum, epNum) {
+        Lampa.Noty.show(Lampa.Lang.translate('online_mod_searching'));
+
+        BWA.loadStreams(serverUrl, balancerObj.balanser, movie, seasonNum, epNum, function (streams) {
+            if (streams.length === 1) {
+                playBwaStream(movie, streams[0], seasonNum, epNum, balancerObj);
+                return;
+            }
+
+            var items = streams.map(function (s) {
+                return {
+                    title: s.voice || 'Озвучка',
+                    subtitle: 'Качество: ' + s.quality + ' | ' + balancerObj.name,
+                    streamObj: s
+                };
+            });
+
+            Lampa.Select.show({
+                title: 'S' + seasonNum + 'E' + epNum + ' - ' + Lampa.Lang.translate('online_mod_select_voice'),
+                items: items,
+                onSelect: function (sel) {
+                    playBwaStream(movie, sel.streamObj, seasonNum, epNum, balancerObj);
+                },
+                onBack: function () {
+                    showBwaEpisodes(movie, balancerObj, serverUrl, seasonNum);
+                }
+            });
+        }, function (err) {
+            Lampa.Noty.show(err || 'Потоки не найдены');
+        });
+    }
+
+    function loadBwaMovieStreams(movie, balancerObj, serverUrl) {
+        Lampa.Noty.show(Lampa.Lang.translate('online_mod_searching'));
+
+        BWA.loadStreams(serverUrl, balancerObj.balanser, movie, null, null, function (streams) {
+            if (streams.length === 1) {
+                playBwaStream(movie, streams[0], null, null, balancerObj);
+                return;
+            }
+
+            var items = streams.map(function (s) {
+                return {
+                    title: s.voice || 'Озвучка',
+                    subtitle: 'Качество: ' + s.quality + ' | ' + balancerObj.name,
+                    streamObj: s
+                };
+            });
+
+            Lampa.Select.show({
+                title: Utils.getMovieTitle(movie) + ' - ' + Lampa.Lang.translate('online_mod_select_voice'),
+                items: items,
+                onSelect: function (sel) {
+                    playBwaStream(movie, sel.streamObj, null, null, balancerObj);
+                },
+                onBack: function () {
+                    handleBwa(movie);
+                }
+            });
+        }, function (err) {
+            Lampa.Noty.show(err || 'Потоки не найдены');
+        });
+    }
+
+    function playBwaStream(movie, stream, seasonNum, epNum, balancerObj) {
+        var mainTitle = Utils.getMovieTitle(movie);
+        var fullTitle = mainTitle;
+        if (seasonNum && epNum) {
+            fullTitle += ' - S' + seasonNum + 'E' + epNum;
+        }
+        if (stream.voice) {
+            fullTitle += ' (' + stream.voice + ')';
+        }
+
+        var hash = Utils.buildCardHash(movie, '_bwa_' + balancerObj.balanser + (seasonNum ? ('_s' + seasonNum + '_e' + epNum) : ''));
+        var view = Lampa.Timeline.view(hash);
+        Utils.markViewed(hash);
+
+        var item = {
+            url: stream.url,
+            title: fullTitle,
+            timeline: view
+        };
+
+        Lampa.Player.play(item);
+        Lampa.Player.playlist([item]);
+    }
+
     // ==========================================
     // UI: Меню «Онлайн» источников
     // ==========================================
     function openOnlineMenu(movie) {
         var movieTitle = Utils.getMovieTitle(movie);
         var items = [
+            {
+                title: Lampa.Lang.translate('online_mod_bwa'),
+                subtitle: Lampa.Lang.translate('online_mod_bwa_desc'),
+                action: 'bwa'
+            },
             {
                 title: Lampa.Lang.translate('online_mod_collaps'),
                 subtitle: Lampa.Lang.translate('online_mod_collaps_desc'),
@@ -978,7 +1316,9 @@
             title: movieTitle ? (movieTitle + ' - ' + Lampa.Lang.translate('online_mod_sources')) : Lampa.Lang.translate('online_mod_sources'),
             items: items,
             onSelect: function (a) {
-                if (a.action === 'collaps') {
+                if (a.action === 'bwa') {
+                    handleBwa(movie);
+                } else if (a.action === 'collaps') {
                     handleCollaps(movie);
                 } else if (a.action === 'filmix') {
                     handleFilmix(movie);
