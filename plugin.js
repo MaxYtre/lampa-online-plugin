@@ -5,7 +5,7 @@
     window.plugin_online_mod_ready = true;
 
     var PLUGIN_NAME = 'Online Mod';
-    var PLUGIN_VERSION = '1.1.0';
+    var PLUGIN_VERSION = '1.2.0';
     var KODIK_TOKEN_DEFAULT = '41dd95f84c21719b09d6c71182237a25';
     var TEST_STREAM_URL = 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
     var CORS_PROXY = 'https://cors.nb557.workers.dev/';
@@ -36,6 +36,16 @@
                 en: 'Online Sources',
                 uk: 'Джерела онлайн'
             },
+            online_mod_collaps: {
+                ru: '⚡ Collaps (HLS, HDRezka, Кубик в Кубе, TVShows)',
+                en: '⚡ Collaps (HLS, HDRezka, Kubik, TVShows)',
+                uk: '⚡ Collaps (HLS, HDRezka, Кубик в Кубі, TVShows)'
+            },
+            online_mod_collaps_desc: {
+                ru: 'Прямые HLS потоки (.m3u8), выбор озвучек и субтитров',
+                en: 'Direct HLS streams (.m3u8), audio tracks and subs',
+                uk: 'Прямі HLS потоки (.m3u8), вибір озвучок та субтитрів'
+            },
             online_mod_filmix: {
                 ru: '🎞️ Filmix (Фильмы, сериалы, 4K/1080p)',
                 en: '🎞️ Filmix (Movies, Series, 4K/1080p)',
@@ -45,6 +55,16 @@
                 ru: 'Огромная база фильмов и сериалов в Full HD и 4K (все сезоны, озвучки)',
                 en: 'Huge library of movies and series in Full HD and 4K (all seasons, dubs)',
                 uk: 'Величезна база фільмів та серіалів у Full HD та 4K (всі сезони, озвучки)'
+            },
+            online_mod_rezka: {
+                ru: '🌐 HDRezka (Каталог и зеркала)',
+                en: '🌐 HDRezka (Catalog & Mirrors)',
+                uk: '🌐 HDRezka (Каталог та дзеркала)'
+            },
+            online_mod_rezka_desc: {
+                ru: 'Каталог озвучек HDRezka (зеркала kvk.zone / rezka.ag)',
+                en: 'HDRezka catalog and mirrors',
+                uk: 'Каталог озвучок HDRezka'
             },
             online_mod_test_player: {
                 ru: '🔧 Диагностика плеера (демо Big Buck Bunny)',
@@ -197,6 +217,17 @@
             var enc = encodeURIComponent(Utils.encodeBase64(url));
             var name = filename || 'api';
             return baseProxy + enc + '/' + name + '?jacred.test';
+        },
+        parseJson: function (data) {
+            if (typeof data === 'object' && data !== null) return data;
+            if (typeof data === 'string') {
+                try {
+                    return JSON.parse(data);
+                } catch (e) {
+                    return null;
+                }
+            }
+            return null;
         }
     };
 
@@ -603,6 +634,7 @@
             network.clear();
             network.timeout(15000);
             network.silent(proxyUrl, function (results) {
+                results = Utils.parseJson(results);
                 var list = Array.isArray(results) ? results : [];
                 Filmix.filterStrict(list, movie, targetYear, onComplete, function () {
                     if (orig && orig !== title) {
@@ -611,6 +643,7 @@
                         network.clear();
                         network.timeout(15000);
                         network.silent(fbProxyUrl, function (fbRes) {
+                            fbRes = Utils.parseJson(fbRes);
                             var fbList = Array.isArray(fbRes) ? fbRes : [];
                             Filmix.filterStrict(fbList, movie, targetYear, onComplete, function () {
                                 onError('На Filmix релиз "' + (title || orig) + '" не найден');
@@ -654,6 +687,7 @@
             network.clear();
             network.timeout(15000);
             network.silent(proxyUrl, function (post) {
+                post = Utils.parseJson(post);
                 if (post && post.player_links) {
                     onComplete(post);
                 } else {
@@ -666,11 +700,154 @@
     };
 
     // ==========================================
+    // 5. Collaps API источник
+    // ==========================================
+    var Collaps = {
+        getKpId: function (movie, callback) {
+            if (movie.kinopoisk_id || movie.kp_id) {
+                return callback(movie.kinopoisk_id || movie.kp_id);
+            }
+            var query = movie.title || movie.name || '';
+            if (!query) return callback(null);
+
+            var network = new Lampa.Reguest();
+            var url = 'https://kinopoiskapiunofficial.tech/api/v2.1/films/search-by-keyword?keyword=' + encodeURIComponent(Utils.cleanTitle(query));
+            network.clear();
+            network.timeout(10000);
+            network.silent(url, function (res) {
+                res = Utils.parseJson(res);
+                var films = (res && res.films) || [];
+                var targetYear = parseInt((movie.release_date || movie.first_air_date || '').slice(0, 4)) || 0;
+                var match = films.find(function (f) {
+                    return Utils.isTitleMatch(f.nameRu, f.nameEn, movie.title, movie.original_title, f.year, targetYear);
+                }) || films[0];
+
+                callback(match ? match.filmId : null);
+            }, function () {
+                callback(null);
+            }, false, {
+                headers: {
+                    'X-API-KEY': 'c20595a1-3d8c-4cbd-92eb-fd7b0fa75c67'
+                }
+            });
+        },
+
+        search: function (movie, onComplete, onError) {
+            var imdb_id = movie.imdb_id;
+
+            function tryFetch(url, fallbackUrl) {
+                var network = new Lampa.Reguest();
+                network.clear();
+                network.timeout(15000);
+                network.native(url, function (html) {
+                    if (typeof html !== 'string') html = String(html || '');
+                    var match = html.match(/makePlayer\(({.*?})\);/s);
+                    if (match) {
+                        try {
+                            var json = eval('(' + match[1] + ')');
+                            if (json && (json.playlist || json.source || json.hls)) {
+                                return onComplete(json);
+                            }
+                        } catch (e) {}
+                    }
+                    if (fallbackUrl) {
+                        tryFetch(fallbackUrl, null);
+                    } else {
+                        onError('Видео в Collaps не найдено');
+                    }
+                }, function () {
+                    if (fallbackUrl) {
+                        tryFetch(fallbackUrl, null);
+                    } else {
+                        onError('Ошибка подключения к Collaps');
+                    }
+                }, false, {
+                    headers: {
+                        'Referer': 'https://api.ortified.ws/'
+                    }
+                });
+            }
+
+            if (imdb_id) {
+                var url1 = 'https://api.ortified.ws/embed/imdb/' + imdb_id;
+                var url2 = 'https://api.kinogram.best/embed/imdb/' + imdb_id;
+                tryFetch(url1, url2);
+            } else {
+                Collaps.getKpId(movie, function (kp_id) {
+                    if (kp_id) {
+                        var url1 = 'https://api.ortified.ws/embed/kp/' + kp_id;
+                        var url2 = 'https://api.kinogram.best/embed/kp/' + kp_id;
+                        tryFetch(url1, url2);
+                    } else {
+                        onError('Не удалось определить Kinopoisk или IMDB ID для Collaps');
+                    }
+                });
+            }
+        }
+    };
+
+    // ==========================================
+    // 6. HDRezka источник
+    // ==========================================
+    var Rezka = {
+        getMirror: function () {
+            var mirror = Lampa.Storage.get('online_mod_rezka_mirror', '') || 'https://kvk.zone';
+            if (mirror.indexOf('://') === -1) mirror = 'https://' + mirror;
+            if (mirror.slice(-1) === '/') mirror = mirror.slice(0, -1);
+            return mirror;
+        },
+
+        search: function (movie, onComplete, onError) {
+            var query = movie.title || movie.name || movie.original_title || '';
+            if (!query) return onError('Не указано название для поиска');
+
+            var mirror = Rezka.getMirror();
+            var searchUrl = mirror + '/search/?do=search&subaction=search&q=' + encodeURIComponent(Utils.cleanTitle(query));
+            var proxyUrl = Utils.buildProxyUrl(searchUrl, 'rezka_search');
+
+            var network = new Lampa.Reguest();
+            network.clear();
+            network.timeout(15000);
+            network.native(proxyUrl, function (html) {
+                if (typeof html !== 'string') html = String(html || '');
+                if (html.indexOf('check-form') !== -1 || html.indexOf('<title>Вход</title>') !== -1) {
+                    return onError('HDRezka требует авторизации на зеркале ' + mirror + '. Рекомендуется использовать Collaps или Filmix (все озвучки HDRezka доступны там без авторизации).');
+                }
+
+                var regex = /<div class="b-content__inline_item"[^>]*data-id="(\d+)"[^>]*>[\s\S]*?<a href="([^"]+)">([^<]+)<\/a>[\s\S]*?<div>([^<]*)<\/div>/g;
+                var match;
+                var list = [];
+                while ((match = regex.exec(html)) !== null) {
+                    list.push({
+                        id: match[1],
+                        link: match[2],
+                        title: match[3],
+                        info: match[4]
+                    });
+                }
+
+                if (list.length) {
+                    onComplete(list);
+                } else {
+                    onError('В HDRezka релиз не найден');
+                }
+            }, function (a, c) {
+                onError('Ошибка подключения к HDRezka: ' + network.errorDecode(a, c));
+            });
+        }
+    };
+
+    // ==========================================
     // UI: Открытие модального меню «Онлайн»
     // ==========================================
     function openOnlineMenu(movie) {
         var movieTitle = movie.title || movie.name || '';
         var items = [
+            {
+                title: Lampa.Lang.translate('online_mod_collaps'),
+                subtitle: Lampa.Lang.translate('online_mod_collaps_desc'),
+                action: 'collaps'
+            },
             {
                 title: Lampa.Lang.translate('online_mod_filmix'),
                 subtitle: Lampa.Lang.translate('online_mod_filmix_desc'),
@@ -680,6 +857,11 @@
                 title: Lampa.Lang.translate('online_mod_kodik'),
                 subtitle: 'Поиск по базе фильмов, сериалов и мультфильмов',
                 action: 'kodik'
+            },
+            {
+                title: Lampa.Lang.translate('online_mod_rezka'),
+                subtitle: Lampa.Lang.translate('online_mod_rezka_desc'),
+                action: 'rezka'
             },
             {
                 title: Lampa.Lang.translate('online_mod_anilibria'),
@@ -697,10 +879,14 @@
             title: movieTitle ? (movieTitle + ' - ' + Lampa.Lang.translate('online_mod_sources')) : Lampa.Lang.translate('online_mod_sources'),
             items: items,
             onSelect: function (a) {
-                if (a.action === 'filmix') {
+                if (a.action === 'collaps') {
+                    handleCollaps(movie);
+                } else if (a.action === 'filmix') {
                     handleFilmix(movie);
                 } else if (a.action === 'kodik') {
                     handleKodik(movie);
+                } else if (a.action === 'rezka') {
+                    handleRezka(movie);
                 } else if (a.action === 'anilibria') {
                     handleAniLibria(movie);
                 } else if (a.action === 'test_hls') {
@@ -710,6 +896,167 @@
             onBack: function () {
                 Lampa.Controller.toggle('content');
             }
+        });
+    }
+
+    // ==========================================
+    // Обработка Collaps
+    // ==========================================
+    function handleCollaps(movie) {
+        Lampa.Noty.show(Lampa.Lang.translate('online_mod_searching'));
+
+        Collaps.search(movie, function (data) {
+            if (data.playlist && data.playlist.seasons && data.playlist.seasons.length) {
+                showCollapsSeries(data, movie);
+            } else if (data.source || data.hls) {
+                playCollapsMovie(data, movie);
+            } else {
+                Lampa.Noty.show('В Collaps нет доступных видеопотоков для релиза');
+            }
+        }, function (err) {
+            Lampa.Noty.show(err || Lampa.Lang.translate('online_mod_not_found'));
+        });
+    }
+
+    function showCollapsSeries(data, movie) {
+        var seasons = data.playlist.seasons.slice().sort(function (a, b) {
+            return parseInt(a.season) - parseInt(b.season);
+        });
+
+        if (seasons.length === 1) {
+            selectCollapsEpisode(data, seasons[0], movie);
+            return;
+        }
+
+        var items = seasons.map(function (s) {
+            return {
+                title: 'Сезон ' + s.season,
+                subtitle: 'Серий: ' + (s.episodes ? s.episodes.length : 0),
+                seasonObj: s
+            };
+        });
+
+        Lampa.Select.show({
+            title: (movie.title || '') + ' - ' + Lampa.Lang.translate('online_mod_select_season'),
+            items: items,
+            onSelect: function (sel) {
+                selectCollapsEpisode(data, sel.seasonObj, movie);
+            },
+            onBack: function () {
+                openOnlineMenu(movie);
+            }
+        });
+    }
+
+    function selectCollapsEpisode(data, seasonObj, movie) {
+        var episodes = seasonObj.episodes || [];
+        if (!episodes.length) {
+            Lampa.Noty.show('В этом сезоне нет серий');
+            return;
+        }
+
+        var items = episodes.map(function (ep, idx) {
+            var epNum = ep.episode || (idx + 1);
+            var epHash = Utils.buildCardHash(movie, '_collaps_s' + seasonObj.season + '_e' + epNum);
+            var isSeen = Utils.isViewed(epHash);
+            var audios = ep.audio && ep.audio.names ? ep.audio.names.join(', ') : 'Стандарт';
+
+            return {
+                title: (isSeen ? '✓ ' : '') + 'Серия ' + epNum + (ep.title ? (' - ' + ep.title) : ''),
+                subtitle: 'Озвучки: ' + audios,
+                index: idx
+            };
+        });
+
+        Lampa.Select.show({
+            title: 'Сезон ' + seasonObj.season + ' - ' + Lampa.Lang.translate('online_mod_select_episode'),
+            items: items,
+            onSelect: function (sel) {
+                playCollapsSeries(data, seasonObj, sel.index, movie);
+            },
+            onBack: function () {
+                showCollapsSeries(data, movie);
+            }
+        });
+    }
+
+    function playCollapsSeries(data, seasonObj, startIndex, movie) {
+        var episodes = seasonObj.episodes || [];
+        var playlist = [];
+
+        episodes.forEach(function (ep, idx) {
+            var epNum = ep.episode || (idx + 1);
+            var hash = Utils.buildCardHash(movie, '_collaps_s' + seasonObj.season + '_e' + epNum);
+            var view = Lampa.Timeline.view(hash);
+            var streamUrl = ep.hls || (ep.dash ? ep.dash : '');
+            var audios = ep.audio && ep.audio.names ? (' (' + ep.audio.names.slice(0, 3).join(', ') + ')') : '';
+
+            playlist.push({
+                url: streamUrl,
+                title: (movie.title || '') + ' - S' + seasonObj.season + 'E' + epNum + audios,
+                timeline: view,
+                episode: parseInt(epNum)
+            });
+        });
+
+        var currentItem = playlist[startIndex] || playlist[0];
+        var curEpNum = episodes[startIndex] ? (episodes[startIndex].episode || (startIndex + 1)) : 1;
+        var curHash = Utils.buildCardHash(movie, '_collaps_s' + seasonObj.season + '_e' + curEpNum);
+        Utils.markViewed(curHash);
+
+        Lampa.Player.play(currentItem);
+        Lampa.Player.playlist(playlist);
+    }
+
+    function playCollapsMovie(data, movie) {
+        var streamUrl = (data.source && data.source.hls) || data.hls || (data.source && data.source.dash) || '';
+        if (!streamUrl) {
+            Lampa.Noty.show('Не найдена ссылка на видеопоток в Collaps');
+            return;
+        }
+
+        var audios = (data.source && data.source.audio && data.source.audio.names) ? (' (' + data.source.audio.names.slice(0, 3).join(', ') + ')') : '';
+        var hash = Utils.buildCardHash(movie, '_collaps_movie');
+        var view = Lampa.Timeline.view(hash);
+        Utils.markViewed(hash);
+
+        var item = {
+            url: streamUrl,
+            title: (movie.title || '') + audios,
+            timeline: view
+        };
+
+        Lampa.Player.play(item);
+        Lampa.Player.playlist([item]);
+    }
+
+    // ==========================================
+    // Обработка HDRezka
+    // ==========================================
+    function handleRezka(movie) {
+        Lampa.Noty.show(Lampa.Lang.translate('online_mod_searching'));
+
+        Rezka.search(movie, function (results) {
+            var items = results.map(function (res) {
+                return {
+                    title: res.title,
+                    subtitle: res.info || 'HDRezka релиз',
+                    item: res
+                };
+            });
+
+            Lampa.Select.show({
+                title: (movie.title || '') + ' - HDRezka',
+                items: items,
+                onSelect: function () {
+                    Lampa.Noty.show('Для мгновенного просмотра без авторизации используйте Collaps или Filmix (включают все озвучки HDRezka)');
+                },
+                onBack: function () {
+                    openOnlineMenu(movie);
+                }
+            });
+        }, function (err) {
+            Lampa.Noty.show(err);
         });
     }
 
@@ -759,7 +1106,8 @@
         Lampa.Noty.show(Lampa.Lang.translate('online_mod_searching'));
 
         Filmix.loadDetails(postId, function (post) {
-            var pl = post.player_links || {};
+            post = Utils.parseJson(post);
+            var pl = (post && post.player_links) || {};
             var hasPlaylist = pl.playlist && typeof pl.playlist === 'object' && Object.keys(pl.playlist).length > 0;
             var hasMovie = pl.movie && (Array.isArray(pl.movie) ? pl.movie.length > 0 : (typeof pl.movie === 'object' && Object.keys(pl.movie).length > 0));
 
@@ -831,7 +1179,7 @@
 
         var transItems = transKeys.map(function (tKey) {
             var epObj = seasonObj[tKey] || {};
-            var epCount = Object.keys(epObj).length;
+            var epCount = Array.isArray(epObj) ? epObj.length : Object.keys(epObj).length;
             return {
                 title: tKey,
                 subtitle: 'Доступно серий: ' + epCount,
@@ -855,9 +1203,10 @@
     function selectFilmixEpisode(post, seasonKey, transKey, movie, releaseTitle) {
         var seasonObj = (post.player_links.playlist || {})[seasonKey] || {};
         var epObj = seasonObj[transKey] || {};
-        var epKeys = Object.keys(epObj).sort(function (a, b) {
-            return parseInt(a) - parseInt(b);
-        });
+        var isArray = Array.isArray(epObj);
+        var epKeys = isArray
+            ? epObj.map(function (item, idx) { return String(idx + 1); })
+            : Object.keys(epObj).sort(function (a, b) { return parseInt(a) - parseInt(b); });
 
         if (!epKeys.length) {
             Lampa.Noty.show('Серии не найдены');
@@ -865,7 +1214,7 @@
         }
 
         var epItems = epKeys.map(function (eKey) {
-            var epData = epObj[eKey] || {};
+            var epData = isArray ? epObj[parseInt(eKey) - 1] : epObj[eKey];
             var epHash = Utils.buildCardHash(movie, '_filmix_s' + seasonKey + '_e' + eKey + '_' + transKey);
             var isSeen = Utils.isViewed(epHash);
             var quals = Filmix.extractQualities(epData);
@@ -893,12 +1242,13 @@
     function playFilmixEpisode(post, seasonKey, transKey, epKeys, startEpKey, movie, releaseTitle) {
         var seasonObj = (post.player_links.playlist || {})[seasonKey] || {};
         var epObj = seasonObj[transKey] || {};
+        var isArray = Array.isArray(epObj);
         var playlist = [];
         var startIndex = 0;
 
         epKeys.forEach(function (eKey, idx) {
             if (eKey === startEpKey) startIndex = idx;
-            var epData = epObj[eKey] || {};
+            var epData = (isArray ? epObj[parseInt(eKey) - 1] : epObj[eKey]) || {};
             var quals = Filmix.extractQualities(epData);
             var qualityMap = {};
 
@@ -1243,6 +1593,7 @@
     function initSettings() {
         if (Lampa.Params && Lampa.Params.select) {
             Lampa.Params.select('online_mod_kodik_token', '', KODIK_TOKEN_DEFAULT);
+            Lampa.Params.select('online_mod_rezka_mirror', '', 'https://kvk.zone');
         }
     }
 
@@ -1259,7 +1610,7 @@
             Lampa.Plugins.add({
                 name: PLUGIN_NAME,
                 version: PLUGIN_VERSION,
-                description: 'Онлайн просмотр фильмов, сериалов и аниме (Filmix, Kodik, AniLibria)',
+                description: 'Онлайн просмотр фильмов, сериалов и аниме (Collaps, Filmix, Kodik, HDRezka, AniLibria)',
                 type: 'video'
             });
         }
